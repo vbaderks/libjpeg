@@ -43,7 +43,7 @@
 ** This class represents the image as a whole, consisting either of a single
 ** or multiple frames.
 **
-** $Id: image.cpp,v 1.72 2020/08/31 07:50:43 thor Exp $
+** $Id: image.cpp,v 1.77 2024/06/20 13:13:36 thor Exp $
 **
 */
 
@@ -79,7 +79,7 @@ class Frame;
 // Create an image
 Image::Image(class Environ *env)
   : JKeeper(env), m_pResidual(NULL), m_pAlphaChannel(NULL), m_pParent(NULL), 
-    m_pMaster(NULL), m_pTables(NULL), m_pDimensions(NULL), m_pSmallest(NULL), 
+    m_pMaster(NULL), m_pTables(NULL), m_pTableOwner(NULL), m_pDimensions(NULL), m_pSmallest(NULL), 
     m_pLast(NULL), m_pCurrent(NULL), m_pImageBuffer(NULL), 
     m_pResidualImage(NULL), m_pChecksum(NULL), 
     m_pLegacyStream(NULL), m_pAdapter(NULL), m_pBoxList(NULL),
@@ -96,7 +96,7 @@ Image::~Image(void)
   delete m_pAlphaChannel;
 
   delete m_pResidual;
-  delete m_pTables;
+  delete m_pTableOwner;
   delete m_pResidualImage;
   delete m_pImageBuffer;
   delete m_pAdapter;
@@ -174,6 +174,7 @@ class Tables *Image::TablesOf(void)
       m_pTables = m_pMaster->TablesOf()->CreateAlphaTables();
     } else {
       m_pTables = new(m_pEnviron) class Tables(m_pEnviron);
+      m_pTableOwner = m_pTables;
     }
   }
 
@@ -563,7 +564,7 @@ class Frame *Image::CreateFrameBuffer(class ByteStream *io,ScanType type)
       LONG marker;
       //
       // This is just the DHP header. Another frame header and more tables are coming.
-      m_pTables->ParseTables(io,NULL);
+      m_pTables->ParseTables(io,NULL,false,false);
       //
       // Now again, the next try. This must now be the real frame.
       marker = io->GetWord();
@@ -618,16 +619,18 @@ class Frame *Image::ParseFrameHeader(class ByteStream *io)
   LONG marker;
   
   do {
-    marker = io->GetWord();
+    marker = io->PeekWord();
     switch(marker) {
     case ByteStream::EOF:
       JPG_THROW(MALFORMED_STREAM,"Image::ParseFrameHeader","unexpected EOF while parsing the image");
       break;
     case 0xffd9: // EOI
-      return NULL;
+      JPG_THROW(MALFORMED_STREAM,"Image::ParseFrameHeader","unexpected EOI marker while parsing the image");
+      break;
     default:
       // Collect the frame type.
-      type = FrameMarkerToScanType(marker);
+      marker = io->GetWord();
+      type   = FrameMarkerToScanType(marker);
       //
       // For non-differential-types: Just create the dimension/frame
       if (m_pChecksum && m_pMaster == NULL && m_pParent == NULL && TablesOf()->ChecksumTables()) {
@@ -665,11 +668,13 @@ class Frame *Image::StartParseFrame(class ByteStream *io)
   if (m_bReceivedFrameHeader == false) {
     assert(m_pTables);
     m_pCurrent = ParseFrameHeader(io);
-    // Create the checksum if it is needed.
-    CreateChecksumWhenNeeded(m_pChecksum);
-    //
-    // Is now there.
-    m_bReceivedFrameHeader = true;
+    if (m_pCurrent) {
+      // Create the checksum if it is needed.
+      CreateChecksumWhenNeeded(m_pChecksum);
+      //
+      // Is now there.
+      m_bReceivedFrameHeader = true;
+    }
   }
   //
   // Otherwise, the frame header has already been parsed off and need not to be
@@ -885,7 +890,7 @@ class Frame *Image::StartMeasureFrame(void)
   current = m_pCurrent->ImageOf();
   assert(current->m_pDimensions);
   //
-  // Check whether this is a hierachical scan. If so, we must first
+  // Check whether this is a hierarchical scan. If so, we must first
   // generate the next higher resolution level if we are not at the lowest
   // level.
   if (current->m_pSmallest) {
@@ -1277,7 +1282,7 @@ class Frame *Image::ParseResidualStream(class DataBox *box)
     // Start parsing its header.
     // And parse the tables following the SOI.
     // This is the residual stream. It is not checksummed.
-    m_pResidual->TablesOf()->ParseTables(sio,NULL);
+    m_pResidual->TablesOf()->ParseTables(sio,NULL,false,false);
     //
     // And start the parsing of the frame header so
     // we can check its dimensions.
@@ -1354,7 +1359,7 @@ class Frame *Image::ParseAlphaChannel(class DataBox *box)
     // Start parsing its header.
     // And parse the tables following the SOI.
     // This is the alpha stream. It is not checksummed.
-    m_pAlphaChannel->TablesOf()->ParseTables(sio,NULL);
+    m_pAlphaChannel->TablesOf()->ParseTables(sio,NULL,false,false);
     //
     // And start the parsing of the frame header so
     // we can check its dimensions.

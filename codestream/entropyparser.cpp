@@ -43,7 +43,7 @@
 ** This class represents the interface for parsing the
 ** entropy coded data in JPEG as part of a single scan.
 **
-** $Id: entropyparser.cpp,v 1.23 2020/08/31 07:50:43 thor Exp $
+** $Id: entropyparser.cpp,v 1.26 2024/11/05 06:39:25 thor Exp $
 **
 */
 
@@ -62,7 +62,7 @@ EntropyParser::EntropyParser(class Frame *frame,class Scan *scan)
 {
   m_ucCount = scan->ComponentsInScan();
 
-  // The residual scan uses all components here, not just for, but
+  // The residual scan uses all components here, not just four, but
   // it does not require the component count either.
   for(volatile UBYTE i = 0;i < m_ucCount && i < 4;i++) {
     JPG_TRY {
@@ -72,9 +72,9 @@ EntropyParser::EntropyParser(class Frame *frame,class Scan *scan)
     } JPG_ENDTRY;
   }
 
-  m_usRestartInterval   = m_pFrame->TablesOf()->RestartIntervalOf();
+  m_ulRestartInterval   = m_pFrame->TablesOf()->RestartIntervalOf();
   m_usNextRestartMarker = 0xffd0;
-  m_usMCUsToGo          = m_usRestartInterval;
+  m_ulMCUsToGo          = m_ulRestartInterval;
   m_bSegmentIsValid     = true;
   m_bScanForDNL         = (m_pFrame->HeightOf() == 0)?true:false;
   m_bDNLFound           = false;
@@ -86,9 +86,9 @@ EntropyParser::EntropyParser(class Frame *frame,class Scan *scan)
 void EntropyParser::StartWriteScan(class ByteStream *,class Checksum *,class BufferCtrl *)
 {
   // Reset the restart marker count.
-  m_usRestartInterval   = m_pFrame->TablesOf()->RestartIntervalOf();
+  m_ulRestartInterval   = m_pFrame->TablesOf()->RestartIntervalOf();
   m_usNextRestartMarker = 0xffd0;
-  m_usMCUsToGo          = m_usRestartInterval;
+  m_ulMCUsToGo          = m_ulRestartInterval;
 }
 ///
 
@@ -108,7 +108,7 @@ void EntropyParser::WriteRestartMarker(class ByteStream *io)
     io->PutWord(m_usNextRestartMarker);
     m_usNextRestartMarker = (m_usNextRestartMarker + 1) & 0xfff7;
   }
-  m_usMCUsToGo          = m_usRestartInterval;
+  m_ulMCUsToGo          = m_ulRestartInterval;
 }
 ///
 
@@ -131,7 +131,7 @@ void EntropyParser::ParseRestartMarker(class ByteStream *io)
     io->GetWord();
     Restart();
     m_usNextRestartMarker = (m_usNextRestartMarker + 1) & 0xfff7;
-    m_usMCUsToGo          = m_usRestartInterval;
+    m_ulMCUsToGo          = m_ulRestartInterval;
     m_bSegmentIsValid     = true;
   } else {
     JPG_WARN(MALFORMED_STREAM,"EntropyParser::ParseRestartMarker",
@@ -160,7 +160,7 @@ void EntropyParser::ParseRestartMarker(class ByteStream *io)
             io->GetWord();
             Restart();
             m_usNextRestartMarker = (m_usNextRestartMarker + 1) & 0xfff7;
-            m_usMCUsToGo          = m_usRestartInterval;
+            m_ulMCUsToGo          = m_ulRestartInterval;
             m_bSegmentIsValid     = true;
             return;
           } else if (((dt - m_usNextRestartMarker) & 0x07) >= 4) {
@@ -176,7 +176,7 @@ void EntropyParser::ParseRestartMarker(class ByteStream *io)
             // do not continue to decode.
             m_bSegmentIsValid     = false;
             m_usNextRestartMarker = (m_usNextRestartMarker + 1) & 0xfff7;
-            m_usMCUsToGo          = m_usRestartInterval;
+            m_ulMCUsToGo          = m_ulRestartInterval;
             // Do not run into a restart as this may pull bytes.
             return;
           }
@@ -186,7 +186,7 @@ void EntropyParser::ParseRestartMarker(class ByteStream *io)
           // the parser run out of fun...
           m_bSegmentIsValid     = false;
           m_usNextRestartMarker = (m_usNextRestartMarker + 1) & 0xfff7;
-          m_usMCUsToGo          = m_usRestartInterval;
+          m_ulMCUsToGo          = m_ulRestartInterval;
           // Do not run into a restart as this may pull bytes.
           return;
         } else {
@@ -234,7 +234,11 @@ bool EntropyParser::ParseDNLMarker(class ByteStream *io)
     if (dt == 0)
       JPG_THROW(MALFORMED_STREAM,"EntropyParser::ParseDNLMarker",
                 "frame height as indicated by the DNL marker is corrupt, must be > 0");
-    
+
+    //
+    // Let the parser itself know what the height is now.
+    PostImageHeight(dt);
+    // Forward to the frame.
     m_pFrame->PostImageHeight(dt);
 
     m_bDNLFound = true;

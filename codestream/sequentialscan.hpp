@@ -42,7 +42,7 @@
 ** A sequential scan, also the first scan of a progressive scan,
 ** Huffman coded.
 **
-** $Id: sequentialscan.hpp,v 1.58 2016/10/28 13:58:53 thor Exp $
+** $Id: sequentialscan.hpp,v 1.60 2024/11/05 06:39:25 thor Exp $
 **
 */
 
@@ -142,6 +142,9 @@ class SequentialScan : public EntropyParser {
   // Large range DCT mode?
   bool                     m_bLargeRange;
   //
+  // Baseline mode?
+  bool                     m_bBaseline;
+  //
   // Encode a single huffman block
   void EncodeBlock(const LONG *block,
                    class HuffmanCoder *dc,class HuffmanCoder *ac,
@@ -169,14 +172,14 @@ class SequentialScan : public EntropyParser {
   // Code any run of zero blocks here. This is only valid in
   // the progressive mode.
   void CodeBlockSkip(class HuffmanCoder *ac,UWORD &skip);
-  // 
   //
 public:
   // Create a sequential scan. The highbit is always ignored as this is
   // a valid setting for progressive only
   SequentialScan(class Frame *frame,class Scan *scan,UBYTE start,UBYTE stop,
                  UBYTE lowbit,UBYTE highbit,
-                 bool differential = false,bool residual = false,bool largerange = false);
+                 bool differential = false,bool residual = false,
+                 bool largerange = false,bool baseline = false);
   //
   ~SequentialScan(void);
   // 

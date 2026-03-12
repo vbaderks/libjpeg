@@ -43,7 +43,7 @@
 ** This class pulls blocks from the frame and reconstructs from those
 ** quantized block lines or encodes from them.
 **
-** $Id: linebitmaprequester.cpp,v 1.35 2017/11/28 16:13:54 thor Exp $
+** $Id: linebitmaprequester.cpp,v 1.40 2023/02/21 09:17:33 thor Exp $
 **
 */
 
@@ -250,7 +250,8 @@ void LineBitmapRequester::Next8Lines(UBYTE c)
   int cnt = 8;
   do {
     struct Line *row = *m_pppImage[c];
-    assert(row);
+    if (!row)
+      break;
     m_pppImage[c] = &(row->m_pNext);
   } while(--cnt && *m_pppImage[c]);
 }
@@ -357,7 +358,7 @@ void LineBitmapRequester::EncodeRegion(const RectAngle<LONG> &region)
       // Advance the quantized rows for the non-subsampled components,
       // downsampled components will be advanced later.
       for(i = 0;i < m_ucCount;i++) {
-        m_pulReadyLines[i]    += 8; // somehwere in the buffer.
+        m_pulReadyLines[i]    += 8; // somewhere in the buffer.
         if (m_ppDownsampler[i] == NULL) {
           Next8Lines(i);
         } else {
@@ -442,6 +443,9 @@ void LineBitmapRequester::ReconstructRegion(const RectAngle<LONG> &orgregion,con
   class ColorTrafo *ctrafo = ColorTrafoOf(false,!rr->rr_bColorTrafo);
   UBYTE i;
 
+  if (ctrafo == NULL)
+    return;
+  
   if (m_bSubsampling && rr->rr_bUpsampling) { 
     for(i = rr->rr_usFirstComponent;i <= rr->rr_usLastComponent;i++) {
       class Component *comp = m_pFrame->ComponentOf(i);
@@ -473,7 +477,11 @@ void LineBitmapRequester::ReconstructRegion(const RectAngle<LONG> &orgregion,con
         for(by = blocks.ra_MinY;by <= blocks.ra_MaxY;by++) {
           for(bx = blocks.ra_MinX;bx <= blocks.ra_MaxX;bx++) {
             LONG dst[64];
-            FetchRegion(bx,*m_pppImage[i],dst);
+            if (*m_pppImage[i]) {
+              FetchRegion(bx,*m_pppImage[i],dst);
+            } else {
+              memset(dst,0,sizeof(dst));
+            }
             up->DefineRegion(bx,by,dst);
           }
           Next8Lines(i);
@@ -503,14 +511,19 @@ void LineBitmapRequester::ReconstructRegion(const RectAngle<LONG> &orgregion,con
             r.ra_MaxX = orgregion.ra_MaxX;
           
           for(i = 0;i < m_ucCount;i++) {
+            // ExtractBitMap must go here, noting that the requested components
+            // correspond to transformed components in YUV space, not to components
+            // in RGB space.
+            ExtractBitmap(m_ppTempIBM[i],r,i);
             if (i >= rr->rr_usFirstComponent && i <= rr->rr_usLastComponent) {
-              ExtractBitmap(m_ppTempIBM[i],r,i);
               if (m_ppUpsampler[i]) {
                 // Upsampled case, take from the upsampler, transform
                 // into the color buffer.
                 m_ppUpsampler[i]->UpsampleRegion(r,m_ppCTemp[i]);
-              } else {
+              } else if (*m_pppImage[i]) {
                 FetchRegion(x,*m_pppImage[i],m_ppCTemp[i]);
+              } else {
+                memset(m_ppCTemp[0],0,sizeof(LONG) * 64);
               }
             } else {
               // Not requested, zero the buffer.
@@ -553,9 +566,13 @@ void LineBitmapRequester::ReconstructRegion(const RectAngle<LONG> &orgregion,con
 
         for(i = 0;i < m_ucCount;i++) {      
           LONG *dst = m_ppCTemp[i];
+          ExtractBitmap(m_ppTempIBM[i],r,i);
           if (i >= rr->rr_usFirstComponent && i <= rr->rr_usLastComponent) {
-            ExtractBitmap(m_ppTempIBM[i],r,i);
-            FetchRegion(x,*m_pppImage[i],dst);
+            if (*m_pppImage[i]) {
+              FetchRegion(x,*m_pppImage[i],dst);
+            } else {
+              memset(dst,0,sizeof(LONG) * 64);
+            }
           } else {
             memset(dst,0,sizeof(LONG) * 64);
           }

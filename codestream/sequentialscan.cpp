@@ -43,7 +43,7 @@
 ** A sequential scan, also the first scan of a progressive scan,
 ** Huffman coded.
 **
-** $Id: sequentialscan.cpp,v 1.89 2020/08/31 07:50:44 thor Exp $
+** $Id: sequentialscan.cpp,v 1.94 2023/02/21 10:17:41 thor Exp $
 **
 */
 
@@ -72,10 +72,10 @@
 /// SequentialScan::SequentialScan
 SequentialScan::SequentialScan(class Frame *frame,class Scan *scan,
                                UBYTE start,UBYTE stop,UBYTE lowbit,UBYTE,
-                               bool differential,bool residual,bool large)
+                               bool differential,bool residual,bool large,bool baseline)
   : EntropyParser(frame,scan), m_pBlockCtrl(NULL), 
     m_ucScanStart(start), m_ucScanStop(stop), m_ucLowBit(lowbit),
-    m_bDifferential(differential), m_bResidual(residual), m_bLargeRange(large)
+    m_bDifferential(differential), m_bResidual(residual), m_bLargeRange(large), m_bBaseline(baseline)
 {  
   UBYTE hidden = m_pFrame->TablesOf()->HiddenDCTBitsOf();
   m_ucCount    = scan->ComponentsInScan();
@@ -115,12 +115,18 @@ void SequentialScan::StartParseScan(class ByteStream *io,class Checksum *chk,cla
   for(i = 0;i < m_ucCount;i++) {
     if (m_ucScanStart == 0) {
       m_pDCDecoder[i]  = m_pScan->DCHuffmanDecoderOf(i);
+      if (m_pDCDecoder[i] == NULL)
+        JPG_THROW(MALFORMED_STREAM,"SequentialScan::StartParseScan",
+                  "Huffman decoder not specified for all components included in scan");
     } else {
       m_pDCDecoder[i]  = NULL; // not required, is AC only.
     }
     if (m_ucScanStop) {
       m_pACDecoder[i]  = m_pScan->ACHuffmanDecoderOf(i);
-    } else {
+      if (m_pACDecoder[i] == NULL)
+        JPG_THROW(MALFORMED_STREAM,"SequentialScan::StartParseScan",
+                  "Huffman decoder not specified for all components included in scan");
+   } else {
       m_pACDecoder[i]  = NULL; // not required, is DC only.
     }
     m_lDC[i]           = 0; 
@@ -273,7 +279,7 @@ void SequentialScan::Restart(void)
 void SequentialScan::Flush(bool)
 {
   if (m_ucScanStop && m_bProgressive) {
-    // Progressive, AC band. It looks wierd to code the remaining
+    // Progressive, AC band. It looks weird to code the remaining
     // block skips right here. However, AC bands in spectral selection
     // are always coded in isolated scans, thus only one component
     // per scan and no interleaving. Hence, no problem.
@@ -734,6 +740,11 @@ void SequentialScan::DecodeBlock(LONG *block,
               // take up the run.
               s = r + 15;          // This maps 16 into 16, 32 into 17 and so on.
               r = m_Stream.Get(4); // The run is decoded separately, without using Huffman.
+              // Check whether this is too large. As we have only 16 bit output at most,
+              // we should get away with most 16 here.
+              if (s >= 24)
+                JPG_THROW(NOT_IMPLEMENTED,"SequentialScan::DecodeBlock",
+                          "AC coefficient too large, cannot decode");
               // Continues with the regular case.
             } else {
               JPG_THROW(MALFORMED_STREAM,"SequentialScan::DecodeBlock",
@@ -782,8 +793,10 @@ void SequentialScan::WriteFrameType(class ByteStream *io)
       io->PutWord(0xffc5);
     } else if (m_bLargeRange) {
       io->PutWord(0xffb3);
+    } else if (m_bBaseline) {
+      io->PutWord(0xffc0);
     } else {
-      io->PutWord(0xffc1); // not baseline, but sequential. Could check that...
+      io->PutWord(0xffc1);
     }
   }
 }
@@ -826,12 +839,12 @@ void SequentialScan::OptimizeBlock(LONG,LONG,UBYTE,double,class DCT *,LONG[64])
   // Create the DC buffer if we do not yet have it.
   if (m_plDCBuffer[component] == NULL) {
     class Component *comp       = m_pComponent[component];
-    ULONG width                 = m_pFrame->WidthOf();
-    ULONG height                = m_pFrame->HeightOf();
-    UBYTE subx                  = comp->SubXOf();
-    UBYTE suby                  = comp->SubYOf();
-    ULONG blockwidth            = (((width  + subx - 1) / subx) + 7) >> 3;
-    ULONG blockheight           = (((height + suby - 1) / suby) + 7) >> 3;
+    const ULONG width           = m_pFrame->WidthOf();
+    const ULONG height          = m_pFrame->HeightOf();
+    const UBYTE subx            = comp->SubXOf();
+    const UBYTE suby            = comp->SubYOf();
+    const ULONG blockwidth      = (((width  + subx - 1) / subx) + 7) >> 3;
+    const ULONG blockheight     = (((height + suby - 1) / suby) + 7) >> 3;
     // Allocate now the DC buffer
     m_ulBlockWidth[component]   = blockwidth;
     m_ulBlockHeight[component]  = blockheight;
@@ -905,7 +918,7 @@ void SequentialScan::OptimizeBlock(LONG,LONG,UBYTE,double,class DCT *,LONG[64])
       // This coefficient may profit from an amplitude change. Actually, we may
       // consider more than one amplitude change, but in reality, it rately makes
       // sense to change the amplitude by more than one bucket. Thus, we only keep
-      // two possibilites here (or actually three, namely set the coefficient to
+      // two possibilities here (or actually three, namely set the coefficient to
       // zero completely).
       // The rate is only reduced if we change the amplitude category by one.
       // (or, theoretically, by more).
@@ -1070,8 +1083,7 @@ void SequentialScan::OptimizeDC(void)
   
   for(c = 0;c < m_ucCount;c++) {
     class Component *comp  = m_pComponent[c];
-    class QuantizedRow *qr = m_pBlockCtrl->CurrentQuantizedRow(comp->IndexOf());
-    class QuantizedRow *q;
+    const class QuantizedRow *volatile qr = m_pBlockCtrl->CurrentQuantizedRow(comp->IndexOf());
     DOUBLE critical        = m_dCritical[c];
     struct BackTrace {
       LONG  *bt_plData;         // Points to the original DC data we want to modify.
@@ -1079,8 +1091,8 @@ void SequentialScan::OptimizeDC(void)
       int    bt_iPrev[3];       // backtrace: The ideal predicessor for the current DC value.
       DOUBLE bt_dFunctional[3]; // the various values for the J functional J = R + \lambda D
     } *btr                 = NULL;
-    volatile UBYTE mcux    = (m_ucCount > 1)?(comp->MCUWidthOf() ):(1);
-    volatile UBYTE mcuy    = (m_ucCount > 1)?(comp->MCUHeightOf()):(1);
+    volatile const UBYTE mcux = (m_ucCount > 1)?(comp->MCUWidthOf() ):(1);
+    volatile const UBYTE mcuy = (m_ucCount > 1)?(comp->MCUHeightOf()):(1);
     ULONG blockwidth       = m_ulBlockWidth[c];
     ULONG blockheight      = m_ulBlockHeight[c];
     ULONG xmcu,ymcu;
@@ -1089,6 +1101,7 @@ void SequentialScan::OptimizeDC(void)
     double weight          = 8.0 / dcdelta;
     //
     JPG_TRY {
+      const class QuantizedRow *volatile q;
       struct BackTrace *bt = (struct BackTrace *)m_pEnviron->AllocVec(sizeof(struct BackTrace) * 
                                                                       (blockwidth * blockheight + 1));
       // Keep the pointer to the start of the array.

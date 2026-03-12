@@ -44,7 +44,7 @@
 ** based processing. It abstracts parts of the residual coding
 ** process.
 **
-** $Id: residualblockhelper.cpp,v 1.67 2017/08/17 13:24:01 thor Exp $
+** $Id: residualblockhelper.cpp,v 1.68 2022/06/14 06:18:30 thor Exp $
 **
 */
 
@@ -374,7 +374,7 @@ void ResidualBlockHelper::AllocateBuffers(void)
         }
       }
     } else {
-      // Code should actually not go in here. How wierd.
+      // Code should actually not go in here. How weird.
       for(i = 0;i < depth;i++) {
         m_bNoiseShaping[i]  = false;
         m_pDCT[i]           = NULL;

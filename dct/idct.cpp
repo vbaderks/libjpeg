@@ -44,7 +44,7 @@
 ** This is an unscaled fix-point DCT. It requires approximately 45 shifts
 ** per row and column.
 **
-** $Id: idct.cpp,v 1.24 2016/10/28 13:58:54 thor Exp $
+** $Id: idct.cpp,v 1.25 2022/06/14 06:18:30 thor Exp $
 **
 */
 
@@ -367,7 +367,7 @@ DOUBLE IDCT<preshift,T,deadzone,optimize>::EstimateCriticalSlope(void)
 }
 ///
 
-/// Instanciate the classes
+/// Instantiate the classes
 template class IDCT<0,LONG,false,false>;
 template class IDCT<1,LONG,false,false>; // For the RCT output
 template class IDCT<ColorTrafo::COLOR_BITS,LONG,false,false>;

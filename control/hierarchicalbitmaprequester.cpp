@@ -45,7 +45,7 @@
 ** decoding. It also keeps the top-level color transformer and the
 ** toplevel subsampling expander.
 **
-** $Id: hierarchicalbitmaprequester.cpp,v 1.42 2020/04/08 10:05:41 thor Exp $
+** $Id: hierarchicalbitmaprequester.cpp,v 1.46 2023/02/21 09:17:33 thor Exp $
 **
 */
 
@@ -245,6 +245,16 @@ void HierarchicalBitmapRequester::PrepareForDecoding(void)
       UBYTE sx = comp->SubXOf();
       UBYTE sy = comp->SubYOf();
 
+      if (m_pLargestScale) {
+        class Frame *frame = m_pLargestScale->FrameOf();
+        while(frame) {
+          if (frame->ComponentOf(i)->SubXOf() != sx || frame->ComponentOf(i)->SubYOf() != sy)
+            JPG_THROW(MALFORMED_STREAM,"HierarchicalBitmapRequester::PrepareForDecoding",
+                      "component subsampling is inconsistent across hierarchical levels");
+          frame = frame->NextOf();
+        }
+      }
+
       if (sx > 1 || sy > 1) {
         m_ppUpsampler[i] = UpsamplerBase::CreateUpsampler(m_pEnviron,sx,sy,
                                                           m_ulPixelWidth,m_ulPixelHeight,
@@ -287,7 +297,7 @@ void HierarchicalBitmapRequester::AddImageScale(class Frame *frame,bool expandh,
     class LineMerger *merger;
     // Two things need to be build: The adapter to the new band, and the merger
     // that merges this band with the output and scales the result
-    // apropriately.
+    // appropriately.
     assert(m_pTempAdapter == NULL);
     // This object will pull out lines from the new high-pass...
     m_pTempAdapter   = frame->BuildLineAdapter();
@@ -624,7 +634,7 @@ void HierarchicalBitmapRequester::EncodeRegion(const RectAngle<LONG> &region)
       // Advance the quantized rows for the non-subsampled components,
       // downsampled components will be advanced later.
       for(i = 0;i < m_ucCount;i++) {
-        m_pulReadyLines[i]    += 8; // somehwere in the buffer.
+        m_pulReadyLines[i]    += 8; // somewhere in the buffer.
         if (m_ppDownsampler[i] == NULL) {
           Push8Lines(i);
         } else {
@@ -696,6 +706,9 @@ void HierarchicalBitmapRequester::ReconstructRegion(const RectAngle<LONG> &orgre
 #if ACCUSOFT_CODE
   class ColorTrafo *ctrafo = ColorTrafoOf(false,!rr->rr_bColorTrafo);
   UBYTE i;
+
+  if (ctrafo == NULL)
+    return;
   
   if (m_bSubsampling && rr->rr_bUpsampling) { 
     for(i = rr->rr_usFirstComponent;i <= rr->rr_usLastComponent;i++) {
@@ -762,8 +775,10 @@ void HierarchicalBitmapRequester::ReconstructRegion(const RectAngle<LONG> &orgre
             r.ra_MaxX = orgregion.ra_MaxX;
           
           for(i = 0;i < m_ucCount;i++) {
+            // Component extraction must go here as the requested components
+            // refer to components in YUV space, not in RGB space.
+            ExtractBitmap(m_ppTempIBM[i],r,i);
             if (i >= rr->rr_usFirstComponent && i <= rr->rr_usLastComponent) {
-              ExtractBitmap(m_ppTempIBM[i],r,i);
               if (m_ppUpsampler[i]) {
                 // Upsampled case, take from the upsampler, transform
                 // into the color buffer.
@@ -817,8 +832,8 @@ void HierarchicalBitmapRequester::ReconstructRegion(const RectAngle<LONG> &orgre
 
         for(i = 0;i < m_ucCount;i++) {      
           LONG *dst = m_ppCTemp[i];
+          ExtractBitmap(m_ppTempIBM[i],r,i);
           if (i >= rr->rr_usFirstComponent && i <= rr->rr_usLastComponent) {
-            ExtractBitmap(m_ppTempIBM[i],r,i);
             FetchRegion(x,m_ppDecodingMCU + (i << 3),dst);
           } else {
             memset(dst,0,sizeof(LONG) * 64);

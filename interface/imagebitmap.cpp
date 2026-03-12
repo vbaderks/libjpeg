@@ -39,10 +39,10 @@
 
 *************************************************************************/
 /*
- * Defininition of the ImageBitMap structure, used to specify
+ * Definition of the ImageBitMap structure, used to specify
  * rectangular memory blocks for image representation.
  * 
- * $Id: imagebitmap.cpp,v 1.9 2017/11/28 13:08:08 thor Exp $
+ * $Id: imagebitmap.cpp,v 1.11 2022/06/14 06:18:30 thor Exp $
  *
  *
  */
@@ -104,7 +104,7 @@ void ImageBitMap::ExtractBitMap(const struct ImageBitMap *source,const RectAngle
   // check whether the source bitmap is *blank*, i.e. has
   // a NULL data pointer. If so, make the child blank as well
   // and null out width and height for consistency
-  if (source->ibm_ucPixelType && width && height) {
+  if (source->ibm_ucPixelType && width && height && source->ibm_pData) {
     ibm_pData = ((UBYTE *)source->ibm_pData) + 
       xshift * ptrdiff_t(source->ibm_cBytesPerPixel) +
       yshift * ptrdiff_t(source->ibm_lBytesPerRow);

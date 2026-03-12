@@ -41,7 +41,7 @@
 /*
 ** Several helper functions that are related to native IO of pixel values
 **
-** $Id: iohelpers.cpp,v 1.9 2015/03/18 10:16:54 thor Exp $
+** $Id: iohelpers.cpp,v 1.12 2024/03/25 18:42:33 thor Exp $
 **
 */
 
@@ -210,8 +210,7 @@ FILE *OpenPNMFile(const char *file,int &width,int &height,int &depth,int &precis
               precision++;
           }
         }
-        
-        if (parms == 3) {
+        if (precision <= 16 && width > 0 && height > 0 && parms == 3) {
           return in;
         }
         fprintf(stderr,"unsupported or invalid PNM format\n");
@@ -287,5 +286,53 @@ FILE *PrepareAlphaForRead(const char *alpha,int width,int height,int &prec,bool 
   }
 
   return in;
+}
+///
+
+/// ParseQuantizationSteps
+// Parse a quantization matrix from a file
+bool ParseQuantizationSteps(LONG lumamatrix[64],LONG chromamatrix[64],const char *filename)
+{
+  FILE *file = fopen(filename,"r");
+  bool result = false;
+
+  if (file) {
+    int i;
+    for(i = 0;i < 64;i++) {
+      int val;
+      if (fscanf(file,"%d",&val) != 1) {
+        fprintf(stderr,"cannot parse an integer value from %s as quantization matrix entry\n",filename);
+        break;
+      }
+      if (val <= 0 || val >= 32768) {
+        fprintf(stderr,"quantization matrix entry %d in file %s is out of range, must be > 0 and < 32768\n",val,filename);
+        break;
+      }
+      lumamatrix[i] = chromamatrix[i] = val;
+    }
+    if (i == 64) {
+      result = true;
+      for(i = 0;i < 64;i++) {
+      int val;
+      if (fscanf(file,"%d",&val) != 1) {
+        if (i > 0) {
+          fprintf(stderr,"cannot parse an integer value from %s as quantization matrix entry\n",filename);
+          result = false;
+        }
+        break;
+      }
+      if (val <= 0 || val >= 32768) {
+        fprintf(stderr,"quantization matrix entry %d in file %s is out of range, must be > 0 and < 32768\n",val,filename);
+        result = false;
+        break;
+      }
+      chromamatrix[i] = val;
+      }
+    }
+    fclose(file);
+  } else {
+    fprintf(stderr,"could not open %s as source for quantization matrix\n",filename);
+  }
+  return result;
 }
 ///

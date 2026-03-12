@@ -42,7 +42,7 @@
 **
 ** A subsequent (refinement) scan of a progressive scan.
 **
-** $Id: refinementscan.cpp,v 1.43 2020/08/31 07:50:43 thor Exp $
+** $Id: refinementscan.cpp,v 1.45 2022/08/03 08:49:34 thor Exp $
 **
 */
 
@@ -103,6 +103,10 @@ void RefinementScan::StartParseScan(class ByteStream *io,class Checksum *chk,cla
   for(i = 0;i < m_ucCount;i++) {
     if (m_ucScanStop || m_bResidual) {
       m_pACDecoder[i]  = m_pScan->ACHuffmanDecoderOf(i);
+      if (m_pACDecoder[i] == NULL)
+        JPG_THROW(MALFORMED_STREAM,"SequentialScan::StartParseScan",
+                  "Huffman decoder not specified for all components included in scan");
+
     } else {
       m_pACDecoder[i]  = NULL; // not required, is DC only.
     }
@@ -193,7 +197,7 @@ bool RefinementScan::StartMCURow(void)
 void RefinementScan::Flush(bool)
 {
   if (m_ucScanStart || m_bResidual) {
-    // Progressive, AC band. It looks wierd to code the remaining
+    // Progressive, AC band. It looks weird to code the remaining
     // block skips right here. However, AC bands in spectral selection
     // are always coded in isolated scans, thus only one component
     // per scan and no interleaving. Hence, no problem.
@@ -461,7 +465,7 @@ void RefinementScan::EncodeBlock(const LONG *block,class HuffmanCoder *ac,UWORD 
         // This is a coefficient which was nonzero in the scan before and
         // hence only undergoes refinement coding. It is skipped for the
         // purpose of runlength coding. Interestingly, the refinement
-        // coding is defined in a somewhat wierd way where the "correction"
+        // coding is defined in a somewhat weird way where the "correction"
         // bits are coded behind a run, but not necessarily behind the
         // "nearest" run. Instead, correction bits go beyond either the first
         // coefficient that becomes significant, or beyond the first run
@@ -530,7 +534,7 @@ void RefinementScan::EncodeBlock(const LONG *block,class HuffmanCoder *ac,UWORD 
             run -= 16;
           }
           // Now we have a non-zero coefficient that just became non-zero.
-          // Since we're coding bitplanes, the coefficent can now only be +1 or -1.
+          // Since we're coding bitplanes, the coefficient can now only be +1 or -1.
           // Since we store the magnitude, it is +1.
           ac->Put(&m_Stream,1 | (run << 4));
           // Store the sign of the coefficient. Zero for negative.
@@ -630,7 +634,7 @@ void RefinementScan::DecodeBlock(LONG *block,
         // Then s is simply zero.
         block[DCT::ScanOrder[k]] = s << m_ucLowBit; 
         //
-        // If this is the last coefficent, then there is nothing more to do
+        // If this is the last coefficient, then there is nothing more to do
         // on this block.
         if (k == m_ucScanStop)
           break;

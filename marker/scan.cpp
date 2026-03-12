@@ -42,7 +42,7 @@
 **
 ** Represents all data in a single scan, and hence is the SOS marker.
 **
-** $Id: scan.cpp,v 1.116 2020/08/31 07:50:44 thor Exp $
+** $Id: scan.cpp,v 1.121 2025/08/15 09:07:16 thor Exp $
 **
 */
 
@@ -338,8 +338,22 @@ void Scan::CreateParser(void)
   //
   assert(m_pParser == NULL);
   //
+  // Check whether all components are there.
+  for(UBYTE i = 0;i < m_ucCount && i < 4;i++) {
+    if (ComponentOf(i) == NULL) {
+      JPG_THROW(MALFORMED_STREAM,"Scan::CreateParser",
+                "found a component ID in a scan that does not exist");
+    }
+  }
+  //
   switch(type) {
   case Baseline:
+    m_pParser = new(m_pEnviron) class SequentialScan(m_pFrame,this,
+                                                     m_ucScanStart,m_ucScanStop,
+                                                     m_ucLowBit + m_ucHiddenBits,
+                                                     m_ucHighBit + m_ucHiddenBits,
+                                                     false,false,false,true);
+    break;
   case Sequential:
     m_pParser = new(m_pEnviron) class SequentialScan(m_pFrame,this,
                                                      m_ucScanStart,m_ucScanStop,
@@ -654,21 +668,14 @@ void Scan::InstallDefaults(UBYTE depth,ULONG tagoffset,const struct JPG_TagItem 
   m_ucHiddenBits   = m_pFrame->TablesOf()->HiddenDCTBitsOf();
   //
   // Install the Huffman table specifications
+  // There are only two tables used here, thus this is always fine for baseline.
   for(UBYTE i = 0;i < depth;i++) {
     UBYTE c = m_ucComponent[i]; // get the component.
 
-    if (/*ishuffman &&*/ colortrafo) {
-      m_ucDCTable[i] = (c == 0)?(0):(1);
-    } else {
-      m_ucDCTable[i] = 0;
-    }
+    m_ucDCTable[i] = m_pFrame->TablesOf()->QuantizationTableIndexOf(c,/*ishuffman &&*/ colortrafo);
     //
     // AC coding not required for predictive.
-    if (/*ishuffman &&*/ !ispredictive && colortrafo) {
-      m_ucACTable[i] = (c == 0)?(0):(1);
-    } else {
-      m_ucACTable[i] = 0;
-    }
+    m_ucACTable[i] = m_pFrame->TablesOf()->QuantizationTableIndexOf(c,/*ishuffman &&*/ !ispredictive && colortrafo);
   } 
   //
   // Install and check the scan parameters for the progressive scan.
@@ -904,6 +911,9 @@ void Scan::StartParseHiddenRefinementScan(class ByteStream *io,class BufferCtrl 
     case Sequential: 
     case Progressive:
       ParseMarker(io,Progressive);
+      if (m_ucHighBit != m_ucLowBit + 1)
+        JPG_THROW(MALFORMED_STREAM,"Scan::ParseMarker",
+                  "SOS high bit is invalid, hidden refinement must refine by one bit per scan");
       m_pParser = new(m_pEnviron) RefinementScan(m_pFrame,this,
                                                  m_ucScanStart,m_ucScanStop,
                                                  m_ucLowBit,m_ucHighBit,
@@ -913,6 +923,9 @@ void Scan::StartParseHiddenRefinementScan(class ByteStream *io,class BufferCtrl 
     case ACProgressive:
 #if ACCUSOFT_CODE
       ParseMarker(io,ACProgressive);
+      if (m_ucHighBit != m_ucLowBit + 1)
+        JPG_THROW(MALFORMED_STREAM,"Scan::StartParseHiddenRefinementScan",
+                  "SOS high bit is invalid, hidden refinement must refine by one bit per scan");
       m_pParser = new(m_pEnviron) ACRefinementScan(m_pFrame,this,
                                                    m_ucScanStart,m_ucScanStop,
                                                    m_ucLowBit,m_ucHighBit,
@@ -928,6 +941,9 @@ void Scan::StartParseHiddenRefinementScan(class ByteStream *io,class BufferCtrl 
       // fall through
     case ResidualDCT:
       ParseMarker(io,ResidualProgressive);
+      if (m_ucHighBit != m_ucLowBit + 1)
+        JPG_THROW(MALFORMED_STREAM,"Scan::StartParseHiddenRefinementScan",
+                  "SOS high bit is invalid, hidden refinement must refine by one bit per scan");
       m_pParser  = new(m_pEnviron) RefinementScan(m_pFrame,this,
                                                   m_ucScanStart,m_ucScanStop,
                                                   m_ucLowBit,m_ucHighBit,
@@ -940,6 +956,9 @@ void Scan::StartParseHiddenRefinementScan(class ByteStream *io,class BufferCtrl 
     case ACResidualDCT:
 #if ACCUSOFT_CODE
       ParseMarker(io,ACResidualProgressive);
+      if (m_ucHighBit != m_ucLowBit + 1)
+        JPG_THROW(MALFORMED_STREAM,"Scan::StartParseHiddenRefinementScan",
+                  "SOS high bit is invalid, hidden refinement must refine by one bit per scan");
       m_pParser  = new(m_pEnviron) ACRefinementScan(m_pFrame,this, 
                                                     m_ucScanStart,m_ucScanStop,
                                                     m_ucLowBit,m_ucHighBit,
@@ -1250,7 +1269,7 @@ void Scan::OptimizeDCTBlock(LONG bx,LONG by,UBYTE compidx,DOUBLE lambda,
 
 /// Scan::OptimizeDC
 // Run a joint optimization of the R/D performance of all DC coefficients
-// within this scan. This requires a separate joint efford as DC coefficients
+// within this scan. This requires a separate joint effort as DC coefficients
 // are encoded dependently.
 void Scan::OptimizeDC(void)
 {

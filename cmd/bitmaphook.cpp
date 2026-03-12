@@ -42,7 +42,7 @@
 ** This header provides the interface for the bitmap hook that 
 ** delivers the bitmap data to the core library.
 **
-** $Id: bitmaphook.cpp,v 1.15 2017/12/05 13:43:02 thor Exp $
+** $Id: bitmaphook.cpp,v 1.18 2024/01/15 06:47:15 thor Exp $
 **
 */
 
@@ -160,8 +160,10 @@ JPG_LONG BitmapHook(struct JPG_Hook *hook, struct JPG_TagItem *tags)
           if (bmm->bmm_pLDRSource && bmm->bmm_pLDRMemPtr) {
             // A designated LDR source is available. Read from here rather than using
             // our primitive tone mapper.
-            fread(bmm->bmm_pLDRMemPtr,sizeof(UBYTE),width * height * bmm->bmm_usDepth,
-                  bmm->bmm_pLDRSource);
+            size_t cnt = fread(bmm->bmm_pLDRMemPtr,sizeof(UBYTE),width * height * bmm->bmm_usDepth,
+                               bmm->bmm_pLDRSource);
+            if (cnt != width * height * bmm->bmm_usDepth)
+              return JPGERR_UNEXPECTED_EOF;
           }
           //
           if (bmm->bmm_pSource) {
@@ -203,8 +205,10 @@ JPG_LONG BitmapHook(struct JPG_Hook *hook, struct JPG_TagItem *tags)
                 } while(--count);
               }
             } else {
-              fread(bmm->bmm_pMemPtr,bmm->bmm_ucPixelType & CTYP_SIZE_MASK,
-                    width * height * bmm->bmm_usDepth,bmm->bmm_pSource);
+              size_t cnt = fread(bmm->bmm_pMemPtr,bmm->bmm_ucPixelType & CTYP_SIZE_MASK,
+                                 width * height * bmm->bmm_usDepth,bmm->bmm_pSource);
+              if (cnt != width * height * bmm->bmm_usDepth)
+                return JPGERR_UNEXPECTED_EOF;
 #ifdef JPG_LIL_ENDIAN
               // On those bloddy little endian machines, an endian swap is necessary
               // as PNM is big-endian.
@@ -365,7 +369,8 @@ JPG_LONG AlphaHook(struct JPG_Hook *hook, struct JPG_TagItem *tags)
     {
       if (bmm->bmm_ucAlphaType == CTYP_UBYTE) {
         UBYTE *mem = (UBYTE *)(bmm->bmm_pAlphaPtr);
-        mem -= miny * bmm->bmm_ulWidth;
+        if (mem)
+          mem -= miny * bmm->bmm_ulWidth;
         tags->SetTagPtr(JPGTAG_BIO_MEMORY        ,mem);
         tags->SetTagData(JPGTAG_BIO_WIDTH        ,bmm->bmm_ulWidth);
         tags->SetTagData(JPGTAG_BIO_HEIGHT       ,8 + miny);
@@ -374,7 +379,8 @@ JPG_LONG AlphaHook(struct JPG_Hook *hook, struct JPG_TagItem *tags)
         tags->SetTagData(JPGTAG_BIO_PIXELTYPE    ,bmm->bmm_ucAlphaType);
       } else if (bmm->bmm_ucAlphaType == CTYP_UWORD) {  
         UWORD *mem = (UWORD *)(bmm->bmm_pAlphaPtr);
-        mem -= miny * bmm->bmm_ulWidth;
+        if (mem)
+          mem -= miny * bmm->bmm_ulWidth;
         tags->SetTagPtr(JPGTAG_BIO_MEMORY        ,mem);
         tags->SetTagData(JPGTAG_BIO_WIDTH        ,bmm->bmm_ulWidth);
         tags->SetTagData(JPGTAG_BIO_HEIGHT       ,8 + miny);
@@ -383,7 +389,8 @@ JPG_LONG AlphaHook(struct JPG_Hook *hook, struct JPG_TagItem *tags)
         tags->SetTagData(JPGTAG_BIO_PIXELTYPE    ,bmm->bmm_ucAlphaType);
      } else if (bmm->bmm_ucAlphaType == CTYP_FLOAT) {   
         FLOAT *mem = (FLOAT *)(bmm->bmm_pAlphaPtr);
-        mem -= miny * bmm->bmm_ulWidth;
+        if (mem)
+          mem -= miny * bmm->bmm_ulWidth;
         tags->SetTagPtr(JPGTAG_BIO_MEMORY        ,mem);
         tags->SetTagData(JPGTAG_BIO_WIDTH        ,bmm->bmm_ulWidth);
         tags->SetTagData(JPGTAG_BIO_HEIGHT       ,8 + miny);
@@ -437,8 +444,10 @@ JPG_LONG AlphaHook(struct JPG_Hook *hook, struct JPG_TagItem *tags)
                 } while(--count);
               }
             } else {
-              fread(bmm->bmm_pAlphaPtr,bmm->bmm_ucAlphaType & CTYP_SIZE_MASK,
-                    bmm->bmm_ulWidth * height,bmm->bmm_pAlphaSource);
+              size_t cnt = fread(bmm->bmm_pAlphaPtr,bmm->bmm_ucAlphaType & CTYP_SIZE_MASK,
+                                 bmm->bmm_ulWidth * height,bmm->bmm_pAlphaSource);
+              if (cnt != bmm->bmm_ulWidth * height)
+                return JPGERR_UNEXPECTED_EOF;
 #ifdef JPG_LIL_ENDIAN
               // On those bloddy little endian machines, an endian swap is necessary
               // as PNM is big-endian.

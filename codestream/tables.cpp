@@ -39,10 +39,10 @@
 
 *************************************************************************/
 /*
-** This class keeps all the coding tables, huffman, AC table, quantization
+** This class keeps all the coding tables, Huffman, AC table, quantization
 ** and other side information.
 **
-** $Id: tables.cpp,v 1.204 2020/04/08 10:05:41 thor Exp $
+** $Id: tables.cpp,v 1.214 2025/08/15 09:06:39 thor Exp $
 **
 */
 
@@ -131,6 +131,8 @@ Tables::~Tables(void)
   delete m_pCameraInfo;
   delete m_pColorFactory; // also deletes the transformation
   delete m_pRestart;
+  delete m_pResidualTables;
+  delete m_pAlphaTables;
 }
 ///
 
@@ -288,15 +290,13 @@ void Tables::InstallDefaultTables(UBYTE precision,UBYTE rangebits,const struct J
     if (rtrafo != JPGFLAG_MATRIX_COLORTRANSFORMATION_NONE) {
       // No longer make this decision depending on the DCT.
       // DCT works now also in the lossless mode.
-      {
-        // DCT is off in the residual domain.
-        if (dopart8) {
-          if (depth == 3 && tags->GetTagData(JPGTAG_RESIDUAL_DCT,false) == false) {
-            // Note that we cannot use the range extension if the DCT is on because
-            // it is not exactly linear, due to approximations, which would
-            // create loss.
-            rct     = true;
-          }
+      // DCT is off in the residual domain.
+      if (dopart8) {
+        if (depth == 3 && tags->GetTagData(JPGTAG_RESIDUAL_DCT,false) == false) {
+          // Note that we cannot use the range extension if the DCT is on because
+          // it is not exactly linear, due to approximations, which would
+          // create loss.
+          rct     = true;
         }
       }
     }
@@ -305,19 +305,19 @@ void Tables::InstallDefaultTables(UBYTE precision,UBYTE rangebits,const struct J
                                      JPGTAG_RESIDUALQUANT_MATRIX:
                                      JPGTAG_QUANTIZATION_MATRIX ,JPGFLAG_QUANTIZATION_ANNEX_K);
       const LONG *lumatable = (const LONG *)tags->GetTagPtr((m_pParent)?
-                                                            JPGTAG_QUANTIZATION_LUMATABLE:
-                                                            JPGTAG_RESIDUALQUANT_LUMATABLE, NULL);
+                                                            JPGTAG_RESIDUALQUANT_LUMATABLE:
+                                                            JPGTAG_QUANTIZATION_LUMATABLE, NULL);
       const LONG *chromatable = (const LONG *)tags->GetTagPtr((m_pParent)?
-                                                              JPGTAG_QUANTIZATION_CHROMATABLE:
-                                                              JPGTAG_RESIDUALQUANT_CHROMATABLE,NULL);
+                                                              JPGTAG_RESIDUALQUANT_CHROMATABLE:
+                                                              JPGTAG_QUANTIZATION_CHROMATABLE,NULL);
       if (m_pParent) {
         m_pQuant->InitDefaultTables(quality,hdrquality,
                                     rtrafo != JPGFLAG_MATRIX_COLORTRANSFORMATION_NONE,
-                                    false,true,rct,matrix,lumatable,chromatable);
+                                    false,true,rct,matrix,precision,lumatable,chromatable);
       } else {
         m_pQuant->InitDefaultTables(quality,hdrquality,
                                     colortrafo != JPGFLAG_MATRIX_COLORTRANSFORMATION_NONE,
-                                    false,false,rct,matrix,lumatable,chromatable);
+                                    false,false,rct,matrix,precision,lumatable,chromatable);
       }
     }
     break;
@@ -385,7 +385,8 @@ void Tables::InstallDefaultTables(UBYTE precision,UBYTE rangebits,const struct J
   }
 
   if (restart) {
-    m_pRestart      = new(m_pEnviron) class RestartIntervalMarker(m_pEnviron);
+    bool isls       = ((frametype & 0x07) == JPGFLAG_JPEG_LS)?true:false;
+    m_pRestart      = new(m_pEnviron) class RestartIntervalMarker(m_pEnviron,isls);
     m_pRestart->InstallDefaults(restart);
   }
 
@@ -879,7 +880,9 @@ class DataBox *Tables::RefinementDataOf(UWORD index,ULONG boxtype) const
   while(box) {
     if (box->BoxTypeOf()    == boxtype &&
         box->EnumeratorOf() == index) {
-      return (DataBox *)(box);
+      class DataBox *dox = (DataBox *)(box);
+      if (dox->isComplete())
+        return dox;
     }
     box = box->NextOf();
   }
@@ -961,7 +964,8 @@ void Tables::WriteTables(class ByteStream *io)
 // Parse off tables, including an application marker,
 // comment, huffman tables or quantization tables.
 // Returns on the first unknown marker.
-void Tables::ParseTables(class ByteStream *io,class Checksum *chk,bool allowexp)
+void Tables::ParseTables(class ByteStream *io,class Checksum *chk,
+                         bool allowexp,bool isls)
 {
   bool repeat;
   //
@@ -970,7 +974,7 @@ void Tables::ParseTables(class ByteStream *io,class Checksum *chk,bool allowexp)
   do {
     // Continue reading markers until the end of the
     // tables/misc section has been found.
-    repeat = ParseTablesIncremental(io,chk,allowexp);
+    repeat = ParseTablesIncremental(io,chk,allowexp,isls);
   } while(repeat);
 }
 ///
@@ -996,7 +1000,8 @@ void Tables::ParseTablesIncrementalInit(bool allowexp)
 // Returns true in case the tables/misc section is not yet complete,
 // and this function should be called again. Returns false in case
 // the tables/misc section is complete.
-bool Tables::ParseTablesIncremental(class ByteStream *io,class Checksum *chk,bool allowexp)
+bool Tables::ParseTablesIncremental(class ByteStream *io,class Checksum *chk,
+                                    bool allowexp,bool isls)
 {
    LONG marker = io->PeekWord();
    
@@ -1039,7 +1044,7 @@ bool Tables::ParseTablesIncremental(class ByteStream *io,class Checksum *chk,boo
      break;
    case 0xffdd: // DRI
      if (m_pRestart == NULL)
-       m_pRestart = new(m_pEnviron) class RestartIntervalMarker(m_pEnviron);
+       m_pRestart = new(m_pEnviron) class RestartIntervalMarker(m_pEnviron,isls);
      if (chk && ChecksumTables()) {
        class ChecksumAdapter csa(io,chk,false);
        csa.GetWord();
@@ -1066,7 +1071,7 @@ bool Tables::ParseTablesIncremental(class ByteStream *io,class Checksum *chk,boo
      }
      break; 
    case 0xfff8: // LSE: JPEG LS extensions marker.
-     { // Not part of a XT stream, thus checksumming is not required.
+     if (isls) { // Not part of a XT stream, thus checksumming is not required.
        io->GetWord();
        LONG len = io->GetWord();
        if (len > 3) {
@@ -1101,6 +1106,8 @@ bool Tables::ParseTablesIncremental(class ByteStream *io,class Checksum *chk,boo
        //
        // Just skip the contents. For now. More later on.
        io->SkipBytes(len - 2);
+     } else {
+       JPG_THROW(MALFORMED_STREAM,"Tables::ParseTables","found LSE marker outside of JPEG LS stream");
      }
      break;
    case 0xffe0: // APP0: Maybe the JFIF marker.
@@ -1323,6 +1330,19 @@ bool Tables::ParseTablesIncremental(class ByteStream *io,class Checksum *chk,boo
        m_bVerticalExpansion   = (evv)?true:false;
      }
      break;
+   case 0xffc8: // The JPEG Extensions marker
+     {
+       LONG len;
+       
+       io->GetWord(); // remove the marker
+       len = io->GetWord();
+       if (len < 2)
+         JPG_THROW(MALFORMED_STREAM,"Tables::ParseTables","marker size out of range");
+       //
+       // Just skip the contents. For now. The JPEG Extensions marker is not in use.
+       io->SkipBytes(len - 2);
+     }
+     break;
    case 0xffc0:
    case 0xffc1:
    case 0xffc2:
@@ -1330,7 +1350,6 @@ bool Tables::ParseTablesIncremental(class ByteStream *io,class Checksum *chk,boo
    case 0xffc5:
    case 0xffc6:
    case 0xffc7:
-   case 0xffc8:
    case 0xffc9:
    case 0xffca:
    case 0xffcb:
@@ -1346,7 +1365,7 @@ bool Tables::ParseTablesIncremental(class ByteStream *io,class Checksum *chk,boo
    case 0xffd9: // EOI
    case 0xffda: // Start of scan.
    case 0xffde: // DHP
-   case 0xfff7: // JPEG LS SOS
+   case 0xfff7: // JPEG LS SOF55
      return false;
    case 0xffff: // A filler byte followed by a marker. Skip.
      io->Get();
@@ -1408,7 +1427,7 @@ class HuffmanTemplate *Tables::FindDCHuffmanTable(UBYTE idx,ScanType type,
   class HuffmanTemplate *t;
 
   if (m_pHuffman == NULL)
-    JPG_THROW(OBJECT_DOESNT_EXIST,"Tables::FindDCHuffmanTable","DHT marker missing for huffman encoded scan");
+    JPG_THROW(OBJECT_DOESNT_EXIST,"Tables::FindDCHuffmanTable","DHT marker missing for Huffman encoded scan");
 
   t = m_pHuffman->DCTemplateOf(idx,type,depth,hidden,scan);
   if (t == NULL)
@@ -1425,7 +1444,7 @@ class HuffmanTemplate *Tables::FindACHuffmanTable(UBYTE idx,ScanType type,
   class HuffmanTemplate *t;
 
   if (m_pHuffman == NULL)
-    JPG_THROW(OBJECT_DOESNT_EXIST,"Tables::FindACHuffmanTable","DHT marker missing for huffman encoded scan");
+    JPG_THROW(OBJECT_DOESNT_EXIST,"Tables::FindACHuffmanTable","DHT marker missing for Huffman encoded scan");
 
   t = m_pHuffman->ACTemplateOf(idx,type,depth,hidden,scan);
   if (t == NULL)
@@ -1471,6 +1490,24 @@ class QuantizationTable *Tables::FindQuantizationTable(UBYTE idx) const
   if (t == NULL)
     JPG_THROW(OBJECT_DOESNT_EXIST,"Tables::FindQuantizationTable","requested quantization matrix not defined");
   return t;
+}
+///
+
+/// Tables::QuantizationTableIndexOf
+// Find the quantzation table for component number.
+// This is for encoder-side quantization table assignment.
+UBYTE Tables::QuantizationTableIndexOf(UBYTE component,bool separatechroma) const
+{
+  if (m_pQuant == NULL)
+    JPG_THROW(OBJECT_DOESNT_EXIST,"Tables::QuantizationTableIndexOf","DQT marker missing, no quantization table defined");
+
+  if (separatechroma) {
+    if (component == 2 && m_pQuant->hasCompleteTables())
+      return 2;
+    if (component > 0)
+      return 1;
+  }
+  return 0;
 }
 ///
 
@@ -1578,7 +1615,7 @@ UBYTE Tables::FractionalRBitsOf(UBYTE count,bool dct) const
 /// Tables::FractionalColorBitsOf
 // Check how many fractional bits the color transformation will use.
 // The DCT flag indicates whether a DCT is in the path. If so, more bits might be allocated
-// to accomodate fractional output bits of the DCT. Note that this
+// to accommodate fractional output bits of the DCT. Note that this
 // is an implementation detail.
 UBYTE Tables::FractionalColorBitsOf(UBYTE count,bool) const
 {  
@@ -1884,7 +1921,7 @@ class DCT *Tables::BuildDCT(class Component *comp,UBYTE count,UBYTE precision) c
 /// Tables::RestartIntervalOf
 // Return the currently active restart interval in MCUs or zero
 // in case restart markers are disabled.
-UWORD Tables::RestartIntervalOf(void) const
+ULONG Tables::RestartIntervalOf(void) const
 {
   if (m_pRestart)
     return m_pRestart->RestartIntervalOf();

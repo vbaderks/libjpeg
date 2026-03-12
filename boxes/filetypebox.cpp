@@ -42,7 +42,7 @@
 ** This box keeps the file type and compatible file types for JPEG XT.
 ** It is basically a profile information.
 **
-** $Id: filetypebox.cpp,v 1.3 2014/09/30 08:33:14 thor Exp $
+** $Id: filetypebox.cpp,v 1.4 2022/06/14 06:18:30 thor Exp $
 **
 */
 
@@ -173,7 +173,7 @@ void FileTypeBox::addCompatibility(ULONG compat)
 
 /// FileTypeBox::isCompatbileTo
 // Check whether this file is compatible to the listed profile ID.
-// It is always understood to be compatibile to the brand, otherwise reading
+// It is always understood to be compatible to the brand, otherwise reading
 // would fail.
 bool FileTypeBox::isCompatbileTo(ULONG compat) const
 {

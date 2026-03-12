@@ -41,7 +41,7 @@
 /*
 ** This class represents the quantization tables.
 **
-** $Id: quantization.cpp,v 1.36 2016/10/28 13:58:54 thor Exp $
+** $Id: quantization.cpp,v 1.38 2025/08/15 09:07:16 thor Exp $
 **
 */
 
@@ -173,11 +173,31 @@ static const LONG ahumada2_luminance_tbl[64] = { // this is also used for chroma
    34,  26,  31,  39,  51,  64,  77,  91,
    45,  33,  38,  47,  59,  74,  91, 108
 };
+static const LONG ahumada2_cb_tbl[64] = { // this is for cb, though currently not used
+   29,  49, 101, 132, 179, 243, 325, 428,
+   49, 110, 101, 114, 144, 188, 245, 319,
+  101, 101, 148, 170, 197, 237, 294, 367,
+  132, 114, 170, 227, 272, 318, 376, 451,
+  179, 144, 197, 272, 347, 415, 486, 569,
+  243, 188, 237, 318, 415, 514, 611, 713,
+  325, 245, 264, 376, 486, 611, 741, 873,
+  428, 419, 367, 451, 569, 713, 873,1040
+};
+static const LONG ahumada2_cr_tbl[64] = { // This is for cr, though currently not used
+   20,  34,  39,  52,  70,  95, 127, 168,
+   34,  43,  40,  45,  57,  74,  96, 125,
+   39,  40,  58,  67,  77,  93, 115, 144,
+   52,  45,  67,  89, 107, 125, 147, 177,
+   70,  57,  77, 107, 136, 163, 191, 223,
+   95,  74,  93, 125, 163, 202, 240, 280,
+  127,  96, 115, 147, 191, 240, 291, 342,
+  168, 125, 144, 177, 223, 280, 342, 408
+};
 ///
 
 /// Quantization::Quantization
 Quantization::Quantization(class Environ *env)
-  : JKeeper(env)
+  : JKeeper(env), m_bComplete(false)
 {
   memset(m_pTables,0,sizeof(m_pTables));
 }
@@ -254,7 +274,7 @@ void Quantization::WriteMarker(class ByteStream *io)
 // table if the table selector is custom.
 void Quantization::InitDefaultTables(UBYTE quality,UBYTE hdrquality,bool colortrafo,
                                      bool addresidual,bool forresidual,bool rct,
-                                     LONG tableselector,
+                                     LONG tableselector,UBYTE precision,
                                      const LONG customluma[64],
                                      const LONG customchroma[64])
 {
@@ -263,6 +283,8 @@ void Quantization::InitDefaultTables(UBYTE quality,UBYTE hdrquality,bool colortr
   const LONG *table       = NULL;
   const LONG *lumatable   = NULL;
   const LONG *chromatable = NULL;
+  const LONG *cbtable     = NULL;
+  const LONG *crtable     = NULL;
   int scale;
   int hdrscale;
  
@@ -334,7 +356,8 @@ void Quantization::InitDefaultTables(UBYTE quality,UBYTE hdrquality,bool colortr
     break;
   case JPGFLAG_QUANTIZATION_AHUMADA2:
     lumatable   = ahumada2_luminance_tbl;
-    chromatable = ahumada2_luminance_tbl;
+    cbtable     = ahumada2_cb_tbl;
+    crtable     = ahumada2_cr_tbl;
     break;
   case JPGFLAG_QUANTIZATION_CUSTOM:
     if (customluma == NULL)
@@ -351,15 +374,30 @@ void Quantization::InitDefaultTables(UBYTE quality,UBYTE hdrquality,bool colortr
               "an invalid quantization matrix type has been specified");
     break;
   }
-  
+
+  //
+  // There are only two tables populated by default, which is consistent
+  // with baseline requirements.
   for(i = 0;i < 4;i++) {
     switch(i) {
     case 0:
       table = lumatable;
       break;
     case 1:
-      if (colortrafo) {
+      if (crtable && colortrafo && hdrscale >= 0) {
+        table = crtable;
+      } else if (cbtable && colortrafo) {
+        table = cbtable;
+      } else if (colortrafo) {
         table = chromatable;
+      } else {
+        table = NULL;
+      }
+      break;
+    case 2:
+      if (crtable && colortrafo && hdrscale < 0) {
+        table       = crtable;
+        m_bComplete = true;
       } else {
         table = NULL;
       }
@@ -369,7 +407,7 @@ void Quantization::InitDefaultTables(UBYTE quality,UBYTE hdrquality,bool colortr
     }
     if (table) {
       for(j = 0;j < 64;j++) {
-        LONG mult  = (i >= 2 || forresidual)?(hdrscale):(scale);
+        LONG mult  = (!m_bComplete && (i >= 2 || forresidual))?(hdrscale):(scale);
         LONG delta = (table[j] * mult  + 50) / 100;
         LONG lelta = (table[j] * scale + 50) / 100;
 #if BETTER_QUANTIZATION
@@ -415,6 +453,10 @@ void Quantization::InitDefaultTables(UBYTE quality,UBYTE hdrquality,bool colortr
           // Luma is also extended by one bit, can even be stripped off for lossless.
           delta <<= 1;
         }
+        // thor fix: if the quantization tables are part of an 8-bit stream,
+        // the table entries shall be byte-sized.
+        if (precision < 12 && delta > 255)
+          delta = 255;
         deltas[j] = delta;
       }
       if (m_pTables[i] == NULL)

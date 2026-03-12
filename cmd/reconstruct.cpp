@@ -43,7 +43,7 @@
 ** command line interface. It doesn't do much except
 ** calling libjpeg.
 **
-** $Id: reconstruct.cpp,v 1.8 2017/11/28 13:08:03 thor Exp $
+** $Id: reconstruct.cpp,v 1.11 2024/01/15 06:38:22 thor Exp $
 **
 */
 
@@ -119,7 +119,10 @@ void Reconstruct(const char *infile,const char *outfile,
       tags->SetTagData(JPGTAG_DECODER_STOP,0);
 #endif      
       if (ok && jpeg->Read(tags)) {
-        UBYTE subx[4],suby[4];
+        // Note that this is really lazy. In reality, the code
+        // should first obtain the number of components and then
+        // allocate the subsampling array.
+        UBYTE subx[256],suby[256];
         struct JPG_TagItem atags[] = {
           JPG_ValueTag(JPGTAG_IMAGE_PRECISION,0),
           JPG_ValueTag(JPGTAG_IMAGE_IS_FLOAT,false),
@@ -172,8 +175,12 @@ void Reconstruct(const char *infile,const char *outfile,
             pixeltype     = CTYP_FLOAT;
           }
 
-          UBYTE alphabytesperpixel = sizeof(UBYTE);
-          UBYTE alphapixeltype     = CTYP_UBYTE; 
+          UBYTE alphabytesperpixel = 0;
+          UBYTE alphapixeltype     = 0;
+          if (aprec > 0) {
+            alphabytesperpixel = sizeof(UBYTE);
+            alphapixeltype     = CTYP_UBYTE;
+          }
           if (aprec > 8) {
             alphabytesperpixel = sizeof(UWORD);
             alphapixeltype     = CTYP_UWORD;
@@ -227,7 +234,8 @@ void Reconstruct(const char *infile,const char *outfile,
             bmm.bmm_bWritePGX = writepgx;
 
             if (writepgx) {
-              for(int i = 0;i < depth;i++) {
+              int i;
+              for(i = 0;i < depth;i++) {
                 char headername[256],rawname[256];
                 FILE *hdr;
                 sprintf(headername,"%s_%d.h",outfile,i);
@@ -240,8 +248,18 @@ void Reconstruct(const char *infile,const char *outfile,
                           (width  + subx[i] - 1) / subx[i],
                           (height + suby[i] - 1) / suby[i]);
                   fclose(hdr);
+                } else {
+                  perror("cannot create output file");
+                  break;
                 }
-                bmm.bmm_PGXFiles[i] = fopen(rawname,"wb");
+                if (!(bmm.bmm_PGXFiles[i] = fopen(rawname,"wb"))) {
+                  perror("cannot create output file");
+                  break;
+                }
+              }
+              if (i < depth) {
+                fclose(bmm.bmm_pTarget);
+                bmm.bmm_pTarget = NULL;
               }
             }
 
@@ -266,6 +284,7 @@ void Reconstruct(const char *infile,const char *outfile,
                     JPG_ValueTag(JPGTAG_MATRIX_LTRAFO,colortrafo),
                     JPG_ValueTag(JPGTAG_DECODER_MINCOMPONENT,comp),
                     JPG_ValueTag(JPGTAG_DECODER_MAXCOMPONENT,comp),
+                    JPG_ValueTag(JPGTAG_DECODER_INCLUDE_ALPHA,bmm.bmm_pAlphaTarget?true:false),
                     JPG_EndTag
                   };
                   
@@ -297,6 +316,7 @@ void Reconstruct(const char *infile,const char *outfile,
                   JPG_ValueTag(JPGTAG_DECODER_MAXY,y+7),
                   JPG_ValueTag(JPGTAG_DECODER_UPSAMPLE,upsample),
                   JPG_ValueTag(JPGTAG_MATRIX_LTRAFO,colortrafo),
+                  JPG_ValueTag(JPGTAG_DECODER_INCLUDE_ALPHA,bmm.bmm_pAlphaTarget?true:false),
                   JPG_EndTag
                 };
                 fprintf(bmm.bmm_pTarget,"P%c\n%d %d\n%d\n",
@@ -321,12 +341,11 @@ void Reconstruct(const char *infile,const char *outfile,
                   y  = lastline;
                 } while(y < height && ok);
               }
+              fclose(bmm.bmm_pTarget);
             } else {
               perror("failed to open the output file");
             }
 
-            fclose(bmm.bmm_pTarget);
-            
             if (bmm.bmm_pAlphaTarget)
               fclose(bmm.bmm_pAlphaTarget);
             

@@ -42,7 +42,7 @@
  * Definition of how to request a given rectangle for display,
  * for load or for checking for a necessary update.
  * 
- * $Id: rectanglerequest.cpp,v 1.15 2017/11/28 13:08:06 thor Exp $
+ * $Id: rectanglerequest.cpp,v 1.17 2022/08/05 11:25:28 thor Exp $
  *
  */
 
@@ -82,7 +82,7 @@ void RectangleRequest::ParseTags(const struct JPG_TagItem *tags,const class Imag
   */
   rr_cPriority          = 0;
   rr_bUpsampling        = true;
-  rr_bIncludeAlpha      = true;
+  rr_bIncludeAlpha      = false;
   rr_bColorTrafo        = true;
   //
   // Changed a bit the reaction on coordinates: We no longer throw
@@ -194,36 +194,7 @@ bool RectangleRequest::Contains(const struct RectangleRequest *sub) const
   if (sub->rr_usLastComponent < rr_usLastComponent)
     return false;
 
-  /*
-  ** currently disabled, doesn't make much sense
-  ** here...
-  // Layers must be equal. If sub would request less layers
-  // than the larger, the difference would be visible. Same
-  // if the sub rectangle requests a deeper layer.
-  if (sub->rr_usUpToLayer != rr_usUpToLayer)
-    return false;
-
-  // If the thumnail size of the sub request is smaller than
-  // that of the supposed to be parent, then the sub request
-  // requests more code blocks than my rectangle and we must
-  // issue it.
-  if (sub->rr_ucThumbSize < rr_ucThumbSize)
-    return false;
-
-  if (sub->rr_ucZThumbSize < rr_ucZThumbSize)
-    return false;
-  **
-  **
-  */
-
-  /*
-  // If the sub-request checks for dirty but the parent does
-  // not, the sub request is not superfluous either.
-  if (sub->rr_ucUpsampling == rr_ucUpsampling)
-    return false;
-  */
-
-  // Otherwise, the sub request is truely superfluous
+  // Otherwise, the sub request is truly superfluous
   // and need not to be issued again.
   return true;
 

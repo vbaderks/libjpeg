@@ -42,7 +42,7 @@
 **
 ** This class represents a single frame and the frame dimensions.
 **
-** $Id: frame.cpp,v 1.130 2020/08/31 07:50:44 thor Exp $
+** $Id: frame.cpp,v 1.134 2022/08/03 12:19:58 thor Exp $
 **
 */
 
@@ -110,6 +110,7 @@ Frame::~Frame(void)
 /// Frame::ParseMarker
 void Frame::ParseMarker(class ByteStream *io)
 {
+  class Frame *first = ImageOf()->FirstFrameOf();
   LONG len = io->GetWord();
   LONG data;
   int i;
@@ -203,6 +204,11 @@ void Frame::ParseMarker(class ByteStream *io)
   //
   // Now complete the components: Subsampling requires maximum.
   for(i = 0;i < m_ucDepth;i++) {
+    // Ensure the MCU dimensions are consistent throughout the hierarchical process.
+    // Note that "first" may, in fact, be identical to this very class.
+    if (first->ComponentOf(i)->MCUWidthOf()  != m_ppComponent[i]->MCUWidthOf() ||
+        first->ComponentOf(i)->MCUHeightOf() != m_ppComponent[i]->MCUHeightOf())
+      JPG_THROW(MALFORMED_STREAM,"Frame::ParseMarker","MCU dimensions are not consistent throughout the process, cannot decode");
     m_ppComponent[i]->SetSubsampling(m_ucMaxMCUWidth,m_ucMaxMCUHeight);
   }
 }
@@ -238,7 +244,7 @@ void Frame::ComputeMCUSizes(void)
   } 
   //
   // Check whether the scm is actually part of the MCU sizes written. If not,
-  // then JPEG cannot support this subsampling setting. Wierd.
+  // then JPEG cannot support this subsampling setting. Weird.
   for(i = 0;i < m_ucDepth;i++) {
     if (m_ppComponent[i]->SubXOf() != m_ucMaxMCUWidth  / m_ppComponent[i]->MCUWidthOf() ||
         m_ppComponent[i]->SubYOf() != m_ucMaxMCUHeight / m_ppComponent[i]->MCUHeightOf())
@@ -803,7 +809,7 @@ class Scan *Frame::StartParseScan(class ByteStream *io,class Checksum *chk)
     //
     // De-activate unless re-activated on the next scan/trailer.
     // The refinement scans are not checksummed.
-    m_pTables->ParseTables(stream,NULL);
+    m_pTables->ParseTables(stream,NULL,false,(m_Type == JPEG_LS)?true:false);
     m_bBuildRefinement = false;
     if (ScanForScanHeader(stream)) {
       class Scan *scan = AttachScan();
@@ -813,13 +819,13 @@ class Scan *Frame::StartParseScan(class ByteStream *io,class Checksum *chk)
   } else {
     // Regular scan.
     if (m_bStartedTables) {
-      if (m_pTables->ParseTablesIncremental(io,chk)) {
+      if (m_pTables->ParseTablesIncremental(io,chk,false,(m_Type == JPEG_LS)?true:false)) {
         // Re-iterate the scan header parsing, not yet done.
         return NULL;
       }
     } else {
       // Indicate that we currently do not yet have a scan, neither an EOF.
-      m_pTables->ParseTablesIncrementalInit();
+      m_pTables->ParseTablesIncrementalInit(false);
       m_bStartedTables = true;
       return NULL;
     }
@@ -1032,7 +1038,7 @@ bool Frame::ParseTrailer(class ByteStream *io)
     case 0xffc9:
     case 0xffca:
     case 0xffcb:
-    case 0xfff7: // JPEG LS SOS
+    case 0xfff7: // JPEG LS SOF55
       // All non-differential frames, may not appear in a hierarchical process.
       JPG_WARN(MALFORMED_STREAM,"Frame::ParseTrailer",
                "found a non-differential frame start behind the initial frame");
@@ -1112,7 +1118,7 @@ bool Frame::ParseTrailer(class ByteStream *io)
         // continue parsing here until we know what we have.
         assert(m_pTables);
         // This might include EXP if we are hierarchical.
-        m_pTables->ParseTables(io,NULL,m_pParent->isHierarchical());
+        m_pTables->ParseTables(io,NULL,m_pParent->isHierarchical(),(m_Type == JPEG_LS)?true:false);
       }
     }
   } while(true);

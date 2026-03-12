@@ -42,7 +42,7 @@
 /*
 ** Definition of the Environment.
 ** 
-** $Id: environment.cpp,v 1.10 2020/04/08 10:05:41 thor Exp $
+** $Id: environment.cpp,v 1.11 2022/06/14 06:18:30 thor Exp $
 **
 ** The environment holds structures for exception management without
 ** exceptions, and for memory management without a global new.
@@ -239,7 +239,7 @@ class Environ &Environ::operator=(class Environ &env)
   // Copy the parent node over.
   m_pParent      = env.m_pParent;
   //
-  // Now carry the active exeption stack frames over
+  // Now carry the active exception stack frames over
   prev           = NULL;
   es             = env.m_Root.m_pActive;
   while(es->m_pPrevious) { 

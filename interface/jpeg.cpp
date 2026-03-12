@@ -46,7 +46,7 @@
 ** for the 10918 (JPEG) codec. Except for the tagitem and hook methods,
 ** no other headers should be publically accessible.
 ** 
-** $Id: jpeg.cpp,v 1.28 2017/11/28 13:08:08 thor Exp $
+** $Id: jpeg.cpp,v 1.29 2021/12/01 11:14:42 thor Exp $
 **
 */
 
@@ -567,7 +567,7 @@ JPG_LONG JPEG::InternalPeekMarker(struct JPG_TagItem *) const
   case 0xffd9: // EOI
   case 0xffda: // Start of scan.
   case 0xffde: // DHP
-  case 0xfff7: // JPEG LS SOS
+  case 0xfff7: // JPEG LS SOF55
     // These are all markers that cannot be handled externally in any case.
     return 0;
   }

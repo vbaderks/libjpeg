@@ -42,7 +42,7 @@
 ** This class builds the proper color transformer from the information
 ** in the MergingSpecBox
 **
-** $Id: colortransformerfactory.cpp,v 1.77 2019/08/21 10:09:57 thor Exp $
+** $Id: colortransformerfactory.cpp,v 1.80 2023/02/21 10:17:46 thor Exp $
 **
 */
 
@@ -65,6 +65,7 @@
 #include "colortrafo/lslosslesstrafo.hpp"
 #include "colortrafo/multiplicationtrafo.hpp"
 #include "colortrafo/colortransformerfactory.hpp"
+#include "marker/lscolortrafo.hpp"
 #include "marker/frame.hpp"
 #define FIX_BITS ColorTrafo::FIX_BITS
 ///
@@ -219,6 +220,9 @@ class ColorTrafo *ColorTransformerFactory::BuildColorTransformer(class Frame *fr
   if (m_pTrafo)
     return m_pTrafo;
 
+  if (etype == 0)
+    return NULL;
+  
   ltrafo = m_pTables->LTrafoTypeOf(count);
   rtrafo = m_pTables->RTrafoTypeOf(count);
   ctrafo = m_pTables->CTrafoTypeOf(count);
@@ -230,7 +234,7 @@ class ColorTrafo *ColorTransformerFactory::BuildColorTransformer(class Frame *fr
   if (specs) {
     ocflags |= ColorTrafo::Extended;
   } else if (ltrafo != MergingSpecBox::JPEG_LS) {
-    // Standard JPEG has clamping sematics, not wrap-around.
+    // Standard JPEG has clamping semantics, not wrap-around.
     ocflags |= ColorTrafo::ClampFlag;
   }
   
@@ -627,6 +631,17 @@ class ColorTrafo *ColorTransformerFactory::BuildLSTransformation(UBYTE type,
       }
       break;
     case 3:
+      const class LSColorTrafo *marker = m_pTables->LSColorTrafoOf();
+      if (marker) {
+        if (marker->DepthOf() != 3) {
+          JPG_THROW(MALFORMED_STREAM,"ColorTransformerFactory::BuildLSTransformation",
+                    "JPEG LS color transformation component count does not match frame depth");
+          break;
+        }
+      } else {
+        assert(!"JPEG LS trafo indicated, but not included in the tables");
+        break;
+      }
       switch(type) {
       case CTYP_UBYTE:
         if (outmax > MAX_UBYTE) {

@@ -42,7 +42,7 @@
 **
 ** Represents the scan including the scan header.
 **
-** $Id: losslessscan.cpp,v 1.50 2015/03/25 08:45:43 thor Exp $
+** $Id: losslessscan.cpp,v 1.53 2024/11/05 06:39:25 thor Exp $
 **
 */
 
@@ -112,6 +112,9 @@ void LosslessScan::StartParseScan(class ByteStream *io,class Checksum *chk,class
   
   for(i = 0;i < m_ucCount;i++) {
     m_pDCDecoder[i]       = m_pScan->DCHuffmanDecoderOf(i);
+    if (m_pDCDecoder[i] == NULL)
+      JPG_THROW(MALFORMED_STREAM,"LosslessScan::StartParseScan",
+                "Huffman decoder not specified for all components included in scan");
   }
   
   assert(ctrl->isLineBased());
@@ -377,6 +380,9 @@ void LosslessScan::ParseMCU(struct Line **prev,struct Line **top)
           v = 0;
         } else if (symbol == 16) {
           v = -32768;
+        } else if (symbol > 16) {
+          JPG_THROW(MALFORMED_STREAM,"LosslessScan::ParseMCU",
+                    "received an out-of-bounds symbol in a lossless JPEG scan");
         } else {
           LONG thre = 1L << (symbol - 1);
           LONG diff = m_Stream.Get(symbol); // get the number of bits 
@@ -426,7 +432,6 @@ bool LosslessScan::ParseMCU(void)
 
   // Loop over lines and columns
   do {
-    bool startofline = true;
     do {
       if (BeginReadMCU(m_Stream.ByteStreamOf())) {
         ParseMCU(prev,top);
@@ -434,14 +439,13 @@ bool LosslessScan::ParseMCU(void)
         // Only if this is not due to a DNL marker that has been detected.
         if (m_ulPixelHeight != 0 && !hasFoundDNL()) {
           ClearMCU(top);
-        } else if (!startofline) {
+        } else {
           // The problem is here that the DNL marker might have been detected, even though decoding
           // is not yet done completely. This may be because there are still just enough bits in the
           // bitream present to run a single decode. Big Outch! Just continue decoding in this case.
           ParseMCU(prev,top);
-        } else break;
+        }
       }
-      startofline = false;
     } while(AdvanceToTheRight());
     //
     // Advance to the next line.
